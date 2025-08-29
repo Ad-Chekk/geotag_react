@@ -1,4 +1,5 @@
 // camera.tsx
+
 import React, { useEffect, useRef, useState } from "react";
 import {
   View,
@@ -12,32 +13,53 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import type { Camera as CameraType } from "expo-camera";
 import ViewShot from "react-native-view-shot";
 import * as MediaLibrary from "expo-media-library";
+import * as ExpoLocation from "expo-location";
 import { useIsFocused } from "@react-navigation/native";
-import { useLocation } from "@/hooks/LocationContent"; // <-- adjust path if needed
+import { useLocation } from "@/hooks/LocationContent"; // <-- your context
 
 export default function CameraScreen() {
-  // camera permission helper from expo-camera
   const [permission, requestPermission] = useCameraPermissions();
   const isFocused = useIsFocused();
 
- const cameraRef = useRef<CameraView | null>(null);
- // camera ref (avoid "value used as type" TS error)
-  const viewShotRef = useRef<any>(null); // viewshot ref
-  const { location } = useLocation(); // from your LocationContent context
+  const cameraRef = useRef<CameraView | null>(null);
+  const viewShotRef = useRef<any>(null);
+
+  const { location, setLocation } = useLocation(); // ✅ we now use setLocation too
 
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [note, setNote] = useState<string>("");
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    // request camera permission on mount (if not granted)
     if (permission && !permission.granted) {
       requestPermission();
     }
   }, [permission]);
+
+  // ✅ Get fresh GPS location before taking a photo
+  const updateLocation = async () => {
+    try {
+      const { status } = await ExpoLocation.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission required", "Location access denied.");
+        return;
+      }
+      const pos = await ExpoLocation.getCurrentPositionAsync({
+        accuracy: ExpoLocation.Accuracy.Highest,
+      });
+
+      setLocation({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        altitude: pos.coords.altitude,
+        accuracy: pos.coords.accuracy,
+      });
+    } catch (err) {
+      console.warn("location error", err);
+    }
+  };
 
   // Take picture
   const takePhoto = async () => {
@@ -46,7 +68,13 @@ export default function CameraScreen() {
       return;
     }
     try {
-      const result = await cameraRef.current.takePictureAsync({ quality: 0.8, skipProcessing: false });
+      // ✅ fetch location right before photo
+      await updateLocation();
+
+      const result = await cameraRef.current.takePictureAsync({
+        quality: 0.8,
+        skipProcessing: false,
+      });
       setPhotoUri(result.uri);
     } catch (e) {
       console.warn("takePhoto error", e);
@@ -64,7 +92,6 @@ export default function CameraScreen() {
     try {
       setIsSaving(true);
 
-      // Request media library permission
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== "granted") {
         Alert.alert("Permission required", "Allow media library access to save photos.");
@@ -72,7 +99,6 @@ export default function CameraScreen() {
         return;
       }
 
-      // capture the view (image + overlays)
       const uri: string = await viewShotRef.current.capture?.({
         format: "jpg",
         quality: 0.9,
@@ -80,18 +106,16 @@ export default function CameraScreen() {
 
       if (!uri) throw new Error("Failed to capture view");
 
-      // create asset and optionally create an album (ignore error if album exists)
       const asset = await MediaLibrary.createAssetAsync(uri);
       try {
         if (Platform.OS === "android" || Platform.OS === "ios") {
           await MediaLibrary.createAlbumAsync("Geotagged", asset, false);
         }
       } catch (err) {
-        // album probably exists — that's fine
+        // album probably exists
       }
 
       Alert.alert("Saved", "Photo with overlay saved to gallery.");
-      // optional: clear preview
       setPhotoUri(null);
       setNote("");
     } catch (err) {
@@ -102,7 +126,6 @@ export default function CameraScreen() {
     }
   };
 
-  // If camera permission not yet resolved
   if (!permission) {
     return (
       <View style={styles.center}>
@@ -121,7 +144,6 @@ export default function CameraScreen() {
     );
   }
 
-  // Pause camera when screen is not focused (prevents the "failed to capture image" issue)
   if (!isFocused) {
     return (
       <View style={styles.center}>
@@ -130,7 +152,6 @@ export default function CameraScreen() {
     );
   }
 
-  // If a photo exists, show the preview with overlay (ViewShot wraps the preview)
   if (photoUri) {
     const timestamp = new Date().toLocaleString();
 
@@ -141,7 +162,6 @@ export default function CameraScreen() {
 
           {/* Overlay box bottom-left */}
           <View style={styles.overlayBox}>
-            {/* Location block */}
             <Text style={styles.overlayText}>
               Lat: {location?.latitude?.toFixed(6) ?? "N/A"}
             </Text>
@@ -155,15 +175,15 @@ export default function CameraScreen() {
               Acc: {location?.accuracy != null ? location.accuracy + " m" : "N/A"}
             </Text>
 
-            {/* Timestamp */}
-            <Text style={[styles.overlayText, { marginTop: 6 }]}>Time: {timestamp}</Text>
-
-            {/* Note */}
-            <Text style={[styles.overlayText, { marginTop: 6 }]}>Note: {note || "-"}</Text>
+            <Text style={[styles.overlayText, { marginTop: 6 }]}>
+              Time: {timestamp}
+            </Text>
+            <Text style={[styles.overlayText, { marginTop: 6 }]}>
+              Note: {note || "-"}
+            </Text>
           </View>
         </ViewShot>
 
-        {/* Note input and buttons */}
         <View style={styles.controls}>
           <TextInput
             value={note}
@@ -175,14 +195,17 @@ export default function CameraScreen() {
           <View style={styles.btnRow}>
             <Button title="Retake" onPress={() => setPhotoUri(null)} />
             <View style={{ width: 12 }} />
-            <Button title={isSaving ? "Saving..." : "Save Photo"} onPress={savePhotoWithOverlay} disabled={isSaving} />
+            <Button
+              title={isSaving ? "Saving..." : "Save Photo"}
+              onPress={savePhotoWithOverlay}
+              disabled={isSaving}
+            />
           </View>
         </View>
       </View>
     );
   }
 
-  // Default camera view
   return (
     <View style={styles.container}>
       <CameraView ref={cameraRef} style={styles.camera} facing="back" />
