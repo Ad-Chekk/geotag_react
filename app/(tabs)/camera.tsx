@@ -4,20 +4,20 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
-  Button,
   Image,
   StyleSheet,
   TextInput,
   Alert,
   Platform,
   ActivityIndicator,
+  TouchableOpacity,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import ViewShot from "react-native-view-shot";
 import * as MediaLibrary from "expo-media-library";
 import * as ExpoLocation from "expo-location";
 import { useIsFocused } from "@react-navigation/native";
-import { useLocation } from "@/hooks/LocationContent"; // <-- your context
+import { useLocation } from "@/hooks/LocationContent";
 
 export default function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -26,7 +26,7 @@ export default function CameraScreen() {
   const cameraRef = useRef<CameraView | null>(null);
   const viewShotRef = useRef<any>(null);
 
-  const { location, setLocation } = useLocation(); // ✅ we now use setLocation too
+  const { location, setLocation } = useLocation();
 
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [note, setNote] = useState<string>("");
@@ -38,7 +38,6 @@ export default function CameraScreen() {
     }
   }, [permission]);
 
-  // ✅ Get fresh GPS location before taking a photo
   const updateLocation = async () => {
     try {
       const { status } = await ExpoLocation.requestForegroundPermissionsAsync();
@@ -61,14 +60,12 @@ export default function CameraScreen() {
     }
   };
 
-  // Take picture
   const takePhoto = async () => {
     if (!cameraRef.current) {
       Alert.alert("Camera not ready");
       return;
     }
     try {
-      // ✅ fetch location right before photo
       await updateLocation();
 
       const result = await cameraRef.current.takePictureAsync({
@@ -82,49 +79,62 @@ export default function CameraScreen() {
     }
   };
 
-  // Save viewshot (image + overlay) to gallery
-  const savePhotoWithOverlay = async () => {
-    if (!viewShotRef.current) {
-      Alert.alert("Error", "Preview not ready");
-      return;
+ const savePhotoWithOverlay = async () => {
+  if (!viewShotRef.current) {
+    Alert.alert("Error", "Preview not ready");
+    return;
+  }
+
+  try {
+    setIsSaving(true);
+
+    // Capture the view with overlay
+    const uri: string = await viewShotRef.current.capture?.({
+      format: "jpg",
+      quality: 0.9,
+    });
+
+    if (!uri) {
+      throw new Error("Failed to capture view");
     }
 
+    // Try to save directly - this will prompt for permission if needed
+    const asset = await MediaLibrary.createAssetAsync(uri);
+    
+    // Try to create or add to album
     try {
-      setIsSaving(true);
-
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== "granted") {
-        Alert.alert("Permission required", "Allow media library access to save photos.");
-        setIsSaving(false);
-        return;
+      const album = await MediaLibrary.getAlbumAsync("Geotagged");
+      if (album) {
+        await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+      } else {
+        await MediaLibrary.createAlbumAsync("Geotagged", asset, false);
       }
-
-      const uri: string = await viewShotRef.current.capture?.({
-        format: "jpg",
-        quality: 0.9,
-      });
-
-      if (!uri) throw new Error("Failed to capture view");
-
-      const asset = await MediaLibrary.createAssetAsync(uri);
-      try {
-        if (Platform.OS === "android" || Platform.OS === "ios") {
-          await MediaLibrary.createAlbumAsync("Geotagged", asset, false);
-        }
-      } catch (err) {
-        // album probably exists
-      }
-
-      Alert.alert("Saved", "Photo with overlay saved to gallery.");
-      setPhotoUri(null);
-      setNote("");
-    } catch (err) {
-      console.warn("save error", err);
-      Alert.alert("Error", "Could not save photo. See console.");
-    } finally {
-      setIsSaving(false);
+    } catch (albumErr) {
+      console.log("Album handling:", albumErr);
     }
-  };
+
+    Alert.alert("Saved", "Photo with overlay saved to gallery.");
+    setPhotoUri(null);
+    setNote("");
+  } catch (err) {
+    console.error("save error", err);
+    
+    // Check if it's a permission error
+    if (err instanceof Error && err.message.includes("permission")) {
+      Alert.alert(
+        "Permission required", 
+        "Please grant media library access in your device settings."
+      );
+    } else {
+      Alert.alert(
+        "Error", 
+        `Could not save photo: ${err instanceof Error ? err.message : "Unknown error"}`
+      );
+    }
+  } finally {
+    setIsSaving(false);
+  }
+};;
 
   if (!permission) {
     return (
@@ -139,7 +149,9 @@ export default function CameraScreen() {
     return (
       <View style={styles.center}>
         <Text>Camera permission is required.</Text>
-        <Button title="Grant camera permission" onPress={requestPermission} />
+        <TouchableOpacity style={styles.button} onPress={requestPermission}>
+          <Text style={styles.buttonText}>Grant Camera Permission</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -160,7 +172,6 @@ export default function CameraScreen() {
         <ViewShot ref={viewShotRef} style={styles.previewWrap}>
           <Image source={{ uri: photoUri }} style={styles.previewImage} />
 
-          {/* Overlay box bottom-left */}
           <View style={styles.overlayBox}>
             <Text style={styles.overlayText}>
               Lat: {location?.latitude?.toFixed(6) ?? "N/A"}
@@ -193,13 +204,19 @@ export default function CameraScreen() {
           />
 
           <View style={styles.btnRow}>
-            <Button title="Retake" onPress={() => setPhotoUri(null)} />
-            <View style={{ width: 12 }} />
-            <Button
-              title={isSaving ? "Saving..." : "Save Photo"}
+            <TouchableOpacity style={[styles.button, { flex: 1, marginRight: 8 }]} onPress={() => setPhotoUri(null)}>
+              <Text style={styles.buttonText}>Retake</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.button, { flex: 1, backgroundColor: "#28A745" }]}
               onPress={savePhotoWithOverlay}
               disabled={isSaving}
-            />
+            >
+              <Text style={styles.buttonText}>
+                {isSaving ? "Saving..." : "Save Photo"}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -210,8 +227,10 @@ export default function CameraScreen() {
     <View style={styles.container}>
       <CameraView ref={cameraRef} style={styles.camera} facing="back" />
 
-      <View style={styles.captureBar}>
-        <Button title="Capture" onPress={takePhoto} />
+      <View style={styles.buttonWrapper}>
+        <TouchableOpacity style={styles.button} onPress={takePhoto}>
+          <Text style={styles.buttonText}>Capture</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -220,7 +239,6 @@ export default function CameraScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
   camera: { flex: 1 },
-  captureBar: { position: "absolute", bottom: 30, alignSelf: "center" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
 
   previewWrap: { width: "100%", height: "70%", backgroundColor: "#000", position: "relative" },
@@ -240,5 +258,29 @@ const styles = StyleSheet.create({
 
   controls: { padding: 12, backgroundColor: "#fff" },
   input: { borderWidth: 1, borderColor: "#ddd", borderRadius: 8, padding: 8, marginBottom: 8 },
-  btnRow: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center" },
+  btnRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+
+  // New modern button styles
+  buttonWrapper: {
+    position: "absolute",
+    bottom: 40,
+    alignSelf: "center",
+  },
+  button: {
+    backgroundColor: "#4A90E2",
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    borderRadius: 25,
+    elevation: 3, // Android shadow
+    shadowColor: "#000", // iOS shadow
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  buttonText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
+  },
 });
