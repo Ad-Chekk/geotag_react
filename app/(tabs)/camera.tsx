@@ -18,6 +18,7 @@ import * as MediaLibrary from "expo-media-library";
 import * as ExpoLocation from "expo-location";
 import { useIsFocused } from "@react-navigation/native";
 import { useLocation } from "@/hooks/LocationContent";
+import { MaterialIcons } from "@expo/vector-icons";
 
 export default function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -228,8 +229,8 @@ export default function CameraScreen() {
       <CameraView ref={cameraRef} style={styles.camera} facing="back" />
 
       <View style={styles.buttonWrapper}>
-        <TouchableOpacity style={styles.button} onPress={takePhoto}>
-          <Text style={styles.buttonText}>Capture</Text>
+        <TouchableOpacity style={styles.captureButton} onPress={takePhoto}>
+          <MaterialIcons name="camera" size={40} color="white" />
         </TouchableOpacity>
       </View>
     </View>
@@ -282,5 +283,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "600",
     textAlign: "center",
+  },
+  captureButton: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderWidth: 3,
+    borderColor: 'white',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
   },
 });
